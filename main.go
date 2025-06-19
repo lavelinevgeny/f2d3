@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"log"
@@ -31,6 +32,8 @@ func main() {
 
 	fmt.Println("f2d3 - file to date tree organizer")
 
+	checkTargetDirectory(targetDir)
+
 	err := filepath.WalkDir(sourceDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -42,6 +45,32 @@ func main() {
 	})
 	if err != nil {
 		log.Fatalf("Error walking directory: %v", err)
+	}
+}
+
+func checkTargetDirectory(targetDir string) {
+	entries, err := os.ReadDir(targetDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			err := os.MkdirAll(targetDir, os.ModePerm)
+			if err != nil {
+				log.Fatalf("Failed to create target directory: %v", err)
+			}
+			return
+		} else {
+			log.Fatalf("Failed to read target directory: %v", err)
+		}
+	}
+
+	if len(entries) > 0 {
+		fmt.Print("Target directory is not empty. Continue? (y/N): ")
+		scanner := bufio.NewScanner(os.Stdin)
+		scanner.Scan()
+		response := strings.TrimSpace(strings.ToLower(scanner.Text()))
+		if response != "y" {
+			fmt.Println("Operation cancelled.")
+			os.Exit(0)
+		}
 	}
 }
 
