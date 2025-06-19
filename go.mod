@@ -1,4 +1,4 @@
-module f2d3
+module github.com/lavelinevgeny/f2d3
 
 go 1.22.4
 
