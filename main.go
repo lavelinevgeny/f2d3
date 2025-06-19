@@ -10,7 +10,8 @@ import (
 	"strings"
 	"time"
 
-	exif "github.com/rwcarlsen/goexif/exif"
+	"github.com/rwcarlsen/goexif/exif"
+	"github.com/schollz/progressbar/v3"
 )
 
 var videoExtensions = map[string]bool{
@@ -22,19 +23,47 @@ var videoExtensions = map[string]bool{
 	".3gp": true,
 }
 
+var bar *progressbar.ProgressBar
+
+const version = "v0.1.0"
+
+var useLog bool
+
 func main() {
-	if len(os.Args) != 3 {
-		log.Fatalf("Usage: f2d3 <sourceDir> <targetDir>")
+	if len(os.Args) < 3 {
+		fmt.Println("Usage: f2d3 <sourceDir> <targetDir> [--log]")
+		os.Exit(1)
 	}
 
 	sourceDir := os.Args[1]
 	targetDir := os.Args[2]
+	useLog = len(os.Args) > 3 && os.Args[3] == "--log"
 
-	fmt.Println("f2d3 - file to date tree organizer")
+	if useLog {
+		setupLogFile()
+		log.Printf("f2d3 version: %s", version)
+		log.Printf("Start time: %s", time.Now().Format(time.RFC3339))
+		log.Printf("Command: %s", strings.Join(os.Args, " "))
+		log.Printf("Source: %s", sourceDir)
+		log.Printf("Target: %s", targetDir)
+	}
 
 	checkTargetDirectory(targetDir)
 
-	err := filepath.WalkDir(sourceDir, func(path string, d os.DirEntry, err error) error {
+	totalFiles, err := countFiles(sourceDir)
+	if err != nil {
+		log.Fatalf("Failed to count files: %v", err)
+	}
+
+	bar = progressbar.NewOptions(totalFiles,
+		progressbar.OptionSetDescription("Processing"),
+		progressbar.OptionShowCount(),
+		progressbar.OptionShowIts(),
+		progressbar.OptionSetPredictTime(true),
+		progressbar.OptionClearOnFinish(),
+	)
+
+	err = filepath.WalkDir(sourceDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -46,6 +75,39 @@ func main() {
 	if err != nil {
 		log.Fatalf("Error walking directory: %v", err)
 	}
+
+	if useLog {
+		log.Printf("Done. Finished at %s", time.Now().Format(time.RFC3339))
+	}
+}
+
+func setupLogFile() {
+	exePath, err := os.Executable()
+	if err != nil {
+		log.Fatalf("Failed to get executable path: %v", err)
+	}
+	dir := filepath.Dir(exePath)
+	logFilePath := filepath.Join(dir, "f2d3.log")
+
+	logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		log.Fatalf("Failed to open log file: %v", err)
+	}
+	log.SetOutput(logFile)
+}
+
+func countFiles(root string) (int, error) {
+	count := 0
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			count++
+		}
+		return nil
+	})
+	return count, err
 }
 
 func checkTargetDirectory(targetDir string) {
@@ -79,7 +141,9 @@ func processFile(path, baseDir, targetBase string) error {
 	isVideo := videoExtensions[ext]
 	t, err := getFileDate(path)
 	if err != nil {
-		log.Printf("[WARN] Failed to get date for %s: %v", path, err)
+		if useLog {
+			log.Printf("[WARN] Failed to get date for %s: %v", path, err)
+		}
 		t = time.Now()
 	}
 
@@ -96,10 +160,26 @@ func processFile(path, baseDir, targetBase string) error {
 	targetPath := filepath.Join(targetDir, filename)
 
 	newPath, renamed := ensureUniqueFilename(targetPath)
-	if renamed {
+	if useLog && renamed {
 		log.Printf("[INFO] Renamed %s -> %s", filename, filepath.Base(newPath))
 	}
-	return copyFile(path, newPath)
+
+	if useLog {
+		log.Printf("Copying: %s -> %s", path, newPath)
+	}
+	err = copyFile(path, newPath)
+	if err != nil {
+		if useLog {
+			log.Printf("[ERROR] Copy failed: %s -> %s : %v", path, newPath, err)
+		}
+		return err
+	}
+	if useLog {
+		log.Printf("Copied: %s", newPath)
+	}
+
+	bar.Add(1)
+	return nil
 }
 
 func isImage(ext string) bool {
@@ -150,21 +230,37 @@ func ensureUniqueFilename(path string) (string, bool) {
 }
 
 func copyFile(src, dst string) error {
-	if err := os.MkdirAll(filepath.Dir(dst), os.ModePerm); err != nil {
-		return err
+	if useLog {
+		log.Printf("Opening source: %s", src)
 	}
 	in, err := os.Open(src)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to open source file: %w", err)
 	}
 	defer in.Close()
 
+	if useLog {
+		log.Printf("Creating target directory: %s", filepath.Dir(dst))
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), os.ModePerm); err != nil {
+		return fmt.Errorf("failed to create target dir: %w", err)
+	}
+
+	if useLog {
+		log.Printf("Creating destination file: %s", dst)
+	}
 	out, err := os.Create(dst)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create destination file: %w", err)
 	}
 	defer out.Close()
 
+	if useLog {
+		log.Printf("Copying data...")
+	}
 	_, err = io.Copy(out, in)
-	return err
+	if err != nil {
+		return fmt.Errorf("copy failed: %w", err)
+	}
+	return nil
 }
