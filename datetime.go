@@ -1,3 +1,4 @@
+// datetime.go — логика получения даты для файлов (EXIF или fallback)
 package main
 
 import (

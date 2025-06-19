@@ -1,5 +1,4 @@
 // logging.go — логирование и настройка лог-файла
-
 package main
 
 import (
@@ -12,13 +11,13 @@ import (
 
 const version = "v0.1.0"
 
+// initLog инициализирует логирование в файл f2d3.log в текущем каталоге
 func initLog(sourceDir, targetDir string) {
-	exePath, err := os.Executable()
+	cwd, err := os.Getwd()
 	if err != nil {
-		log.Fatalf("Failed to get executable path: %v", err)
+		log.Fatalf("Failed to get current working directory: %v", err)
 	}
-	dir := filepath.Dir(exePath)
-	logFilePath := filepath.Join(dir, "f2d3.log")
+	logFilePath := filepath.Join(cwd, "f2d3.log")
 
 	logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
@@ -33,6 +32,7 @@ func initLog(sourceDir, targetDir string) {
 	log.Printf("Target: %s", targetDir)
 }
 
+// logDone записывает время завершения работы
 func logDone() {
 	log.Printf("Done. Finished at %s", time.Now().Format(time.RFC3339))
 }
