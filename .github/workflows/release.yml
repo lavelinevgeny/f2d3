@@ -1,6 +1,5 @@
 name: Build & Release
 
-# Grant the token write access to repository contents (needed to create releases)
 permissions:
   contents: write
 
@@ -44,3 +43,4 @@ jobs:
           asset_path: ./f2d3.exe
           asset_name: f2d3.exe
           asset_content_type: application/octet-stream
+          token: ${{ secrets.GITHUB_TOKEN }}
