@@ -1,5 +1,9 @@
 name: Build & Release
 
+# Grant the token write access to repository contents (needed to create releases)
+permissions:
+  contents: write
+
 on:
   push:
     tags:
