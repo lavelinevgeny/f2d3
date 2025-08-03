@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/md5"
 	"fmt"
 	"io"
@@ -11,28 +12,52 @@ import (
 )
 
 // filesAreEqual возвращает true, если два файла полностью идентичны по байтам.
-func filesAreEqual(path1, path2 string) bool {
+
+func filesAreEqual(path1, path2 string) (bool, error) {
+	info1, err := os.Stat(path1)
+	if err != nil {
+		return false, err
+	}
+	info2, err := os.Stat(path2)
+	if err != nil {
+		return false, err
+	}
+
+	if info1.Size() != info2.Size() {
+		return false, nil
+	}
+
 	f1, err := os.Open(path1)
 	if err != nil {
-		return false
+		return false, err
 	}
-	defer f1.Close()
+	defer func() {
+		if cerr := f1.Close(); cerr != nil && useLog {
+			log.Printf("[WARN] Failed to close file %s: %v", path1, cerr)
+		}
+	}()
 
 	f2, err := os.Open(path2)
 	if err != nil {
-		return false
+		return false, err
 	}
-	defer f2.Close()
+	defer func() {
+		if cerr := f2.Close(); cerr != nil && useLog {
+			log.Printf("[WARN] Failed to close file %s: %v", path2, cerr)
+		}
+	}()
 
 	h1 := md5.New()
 	h2 := md5.New()
+
 	if _, err := io.Copy(h1, f1); err != nil {
-		return false
+		return false, err
 	}
 	if _, err := io.Copy(h2, f2); err != nil {
-		return false
+		return false, err
 	}
-	return string(h1.Sum(nil)) == string(h2.Sum(nil))
+
+	return bytes.Equal(h1.Sum(nil), h2.Sum(nil)), nil
 }
 
 // resolveDestination решает, куда копировать src -> dst:
@@ -45,9 +70,19 @@ func resolveDestination(src, dst string) (finalDst string, skip, renamed bool) {
 		return dst, false, false
 	}
 	// 2) dst есть — сравниваем содержимое
-	if filesAreEqual(src, dst) {
-		return dst, true, false
+	equal, err := filesAreEqual(src, dst)
+	if err != nil {
+		if useLog {
+			log.Printf("[ERROR] Failed to compare files: %s <-> %s : %v", src, dst, err)
+		}
+		// Обработка ошибки: в этом примере — считаем, что не равны и продолжаем
+		return "", false, false
 	}
+
+	if equal {
+		return dst, true, false // файлы идентичны, можно пропустить
+	}
+
 	// 3) dst есть и отличается — ищем уникальное имя
 	dir := filepath.Dir(dst)
 	base := filepath.Base(dst)

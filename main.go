@@ -18,20 +18,41 @@ var (
 		".mp4": true, ".avi": true, ".mov": true,
 		".mkv": true, ".mts": true, ".3gp": true,
 	}
-	bar         *progressbar.ProgressBar
-	useLog      bool
-	skipList    []string
-	renamedList []string
+	bar               *progressbar.ProgressBar
+	useLog, moveFiles bool
+	skipList          []string
+	renamedList       []string
 )
 
 func main() {
-	if len(os.Args) < 3 {
-		fmt.Println("Usage: f2d3 <sourceDir> <targetDir> [--log]")
+
+	var src, dst string
+	var positionalArgs []string
+
+	for _, arg := range os.Args[1:] {
+		switch arg {
+		case "--log":
+			useLog = true
+		case "--move":
+			moveFiles = true
+		default:
+			positionalArgs = append(positionalArgs, arg)
+		}
+	}
+
+	if len(positionalArgs) < 2 {
+		fmt.Println("Usage: f2d3 <sourceDir> <targetDir> [--log] [--move]")
+
+		fmt.Printf("Received %d argument(s):\n", len(os.Args)-1)
+		for i, arg := range os.Args[1:] {
+			fmt.Printf("%d: %s\n", i, arg)
+		}
+
 		os.Exit(1)
 	}
-	src := os.Args[1]
-	dst := os.Args[2]
-	useLog = len(os.Args) > 3 && os.Args[3] == "--log"
+
+	src = positionalArgs[0]
+	dst = positionalArgs[1]
 
 	if useLog {
 		initLog(src, dst)
@@ -58,7 +79,7 @@ func main() {
 		if d.IsDir() {
 			return nil
 		}
-		return processFile(path, src, dst)
+		return processFile(path, dst)
 	})
 	if err != nil {
 		log.Fatalf("Error walking directory: %v", err)
@@ -132,7 +153,7 @@ func countFiles(root string) (int, error) {
 }
 
 // processFile обрабатывает один файл: вычисляет дату, категорию, определяет, копировать/переименовывать/пропускать.
-func processFile(path, baseDir, targetBase string) error {
+func processFile(path, targetBase string) error {
 	ext := strings.ToLower(filepath.Ext(path))
 	isVideo := videoExtensions[ext]
 
@@ -159,11 +180,10 @@ func processFile(path, baseDir, targetBase string) error {
 	finalDst, skip, renamed := resolveDestination(path, destPath)
 
 	if skip {
-		msg := fmt.Sprintf("%s", path)
-		fmt.Println("[INFO] Skipped identical:", msg)
-		skipList = append(skipList, msg)
+		fmt.Println("[INFO] Skipped identical:", path)
+		skipList = append(skipList, path)
 		if useLog {
-			log.Printf("[INFO] Skipped identical: %s", msg)
+			log.Printf("[INFO] Skipped identical: %s", path)
 		}
 		bar.Add(1)
 		return nil
@@ -190,6 +210,21 @@ func processFile(path, baseDir, targetBase string) error {
 	if useLog {
 		log.Printf("Copied: %s", finalDst)
 	}
+
+	if moveFiles {
+
+		if err := os.Remove(path); err != nil {
+			if useLog {
+				log.Printf("[ERROR] Failed to remove original file: %s : %v", path, err)
+			}
+			return err
+		}
+		if useLog {
+			log.Printf("Removed: %s", path)
+		}
+
+	}
+
 	bar.Add(1)
 	return nil
 }
