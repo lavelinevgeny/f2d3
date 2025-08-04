@@ -19,15 +19,23 @@ var (
 	}
 	// прогрессбар
 	bar *progressbar.ProgressBar
-	// флаги из CLI
-	useLog, moveFiles bool
-	// списки для итогового отчёта
-	skipList    []string
-	renamedList []string
 )
 
+type AppConfig struct {
+	SrcDir string
+	DstDir string
+	// флаги из CLI
+	UseLog    bool
+	MoveFiles bool
+	// списки для итогового отчёта
+	SkipList    []string
+	RenamedList []string
+}
+
+var cfg *AppConfig
+
 func main() {
-	var src, dst string
+	var useLog, moveFiles bool
 	var positionalArgs []string
 
 	// разбор флагов
@@ -51,22 +59,26 @@ func main() {
 		os.Exit(1)
 	}
 
-	src = positionalArgs[0]
-	dst = positionalArgs[1]
+	cfg = &AppConfig{
+		SrcDir:    positionalArgs[0],
+		DstDir:    positionalArgs[1],
+		UseLog:    useLog,
+		MoveFiles: moveFiles,
+	}
 
 	// инициализация логирования
-	if useLog {
-		initLog(src, dst)
+	if cfg.UseLog {
+		initLog(cfg.SrcDir, cfg.DstDir)
 	}
 
 	// проверка и подготовка целевой директории
-	if err := checkTargetDirectory(dst); err != nil {
+	if err := checkTargetDirectory(cfg.DstDir); err != nil {
 		logf(LogErr, "Cannot prepare target directory: %v", err)
 		os.Exit(1)
 	}
 
 	// подсчет файлов
-	total, err := countFiles(src)
+	total, err := countFiles(cfg.SrcDir)
 	if err != nil {
 		logf(LogErr, "Failed to count files: %v", err)
 		os.Exit(1)
@@ -80,14 +92,14 @@ func main() {
 	)
 
 	// обход дерева
-	err = filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
+	err = filepath.WalkDir(cfg.SrcDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if d.IsDir() {
 			return nil
 		}
-		return processFile(path, dst)
+		return processFile(cfg, path)
 	})
 	if err != nil {
 		logf(LogErr, "Error walking directory: %v", err)
@@ -95,16 +107,16 @@ func main() {
 	}
 
 	// вывод результатов
-	if len(skipList) > 0 {
+	if len(cfg.SkipList) > 0 {
 		fmt.Println("\nSkipped identical files:")
-		for _, p := range skipList {
+		for _, p := range cfg.SkipList {
 			fmt.Println("  ", p)
 			logf(LogInfo, "Skipped identical: %s", p)
 		}
 	}
-	if len(renamedList) > 0 {
+	if len(cfg.RenamedList) > 0 {
 		fmt.Println("\nRenamed files:")
-		for _, m := range renamedList {
+		for _, m := range cfg.RenamedList {
 			fmt.Println("  ", m)
 			logf(LogInfo, "Renamed: %s", m)
 		}
@@ -154,7 +166,8 @@ func countFiles(root string) (int, error) {
 }
 
 // processFile обрабатывает один файл: вычисляет дату, категорию и решает, копировать или перемещать.
-func processFile(path, targetBase string) error {
+func processFile(cfg *AppConfig, path string) error {
+	targetBase := cfg.DstDir
 	ext := strings.ToLower(filepath.Ext(path))
 	isVideo := videoExtensions[ext]
 
@@ -179,7 +192,7 @@ func processFile(path, targetBase string) error {
 	finalDst, skip, renamed := resolveDestination(path, destPath)
 
 	if skip {
-		skipList = append(skipList, path)
+		cfg.SkipList = append(cfg.SkipList, path)
 		logf(LogInfo, "Skipped identical: %s", path)
 		bar.Add(1)
 		return nil
@@ -187,7 +200,7 @@ func processFile(path, targetBase string) error {
 
 	if renamed {
 		msg := fmt.Sprintf("%s -> %s", path, finalDst)
-		renamedList = append(renamedList, msg)
+		cfg.RenamedList = append(cfg.RenamedList, msg)
 		logf(LogInfo, "Renamed: %s", msg)
 	}
 
@@ -198,7 +211,7 @@ func processFile(path, targetBase string) error {
 	}
 	logf(LogInfo, "Copied: %s", finalDst)
 
-	if moveFiles {
+	if cfg.MoveFiles {
 		if err := os.Remove(path); err != nil {
 			logf(LogErr, "Failed to remove original file: %s : %v", path, err)
 			return err

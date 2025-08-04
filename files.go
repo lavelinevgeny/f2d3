@@ -32,7 +32,7 @@ func filesAreEqual(path1, path2 string) (bool, error) {
 		return false, err
 	}
 	defer func() {
-		if cerr := f1.Close(); cerr != nil && useLog {
+		if cerr := f1.Close(); cerr != nil {
 			logf(LogWarning, "Failed to close file %s: %v", path1, cerr)
 		}
 	}()
@@ -42,7 +42,7 @@ func filesAreEqual(path1, path2 string) (bool, error) {
 		return false, err
 	}
 	defer func() {
-		if cerr := f2.Close(); cerr != nil && useLog {
+		if cerr := f2.Close(); cerr != nil {
 			logf(LogWarning, "Failed to close file %s: %v", path2, cerr)
 		}
 	}()

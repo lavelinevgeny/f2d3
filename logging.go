@@ -56,7 +56,7 @@ func logf(level LogLevel, format string, args ...interface{}) {
 	prefix := fmt.Sprintf("[%s] ", strings.ToUpper(string(level)))
 
 	// 3) пишем в файл
-	if useLog {
+	if cfg.UseLog {
 		log.Printf(prefix + msg)
 	}
 
