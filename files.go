@@ -1,4 +1,4 @@
-// files.go — копирование, сравнение, переименование
+// files.go — копирование, сравнение и разрешение конфликтов имён
 package main
 
 import (
@@ -6,14 +6,14 @@ import (
 	"crypto/md5"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 )
 
-// filesAreEqual возвращает true, если два файла полностью идентичны по байтам.
-
+// filesAreEqual возвращает true, если два файла идентичны по содержимому
+// или ошибку, если не удалось провести сравнение.
 func filesAreEqual(path1, path2 string) (bool, error) {
+	// Быстрая проверка размера
 	info1, err := os.Stat(path1)
 	if err != nil {
 		return false, err
@@ -22,18 +22,18 @@ func filesAreEqual(path1, path2 string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-
 	if info1.Size() != info2.Size() {
 		return false, nil
 	}
 
+	// Открываем оба файла
 	f1, err := os.Open(path1)
 	if err != nil {
 		return false, err
 	}
 	defer func() {
 		if cerr := f1.Close(); cerr != nil && useLog {
-			log.Printf("[WARN] Failed to close file %s: %v", path1, cerr)
+			logf(LogWarning, "Failed to close file %s: %v", path1, cerr)
 		}
 	}()
 
@@ -43,10 +43,11 @@ func filesAreEqual(path1, path2 string) (bool, error) {
 	}
 	defer func() {
 		if cerr := f2.Close(); cerr != nil && useLog {
-			log.Printf("[WARN] Failed to close file %s: %v", path2, cerr)
+			logf(LogWarning, "Failed to close file %s: %v", path2, cerr)
 		}
 	}()
 
+	// Вычисляем MD5-хеши
 	h1 := md5.New()
 	h2 := md5.New()
 
@@ -57,6 +58,7 @@ func filesAreEqual(path1, path2 string) (bool, error) {
 		return false, err
 	}
 
+	// Сравниваем
 	return bytes.Equal(h1.Sum(nil), h2.Sum(nil)), nil
 }
 
@@ -64,26 +66,23 @@ func filesAreEqual(path1, path2 string) (bool, error) {
 // 1) если dst не существует — вернёт (dst, skip=false, renamed=false).
 // 2) если dst существует и идентичен src — вернёт (dst, skip=true, renamed=false).
 // 3) если dst существует, но отличается — найдёт dst_1, dst_2… и вернёт (uniqueDst, skip=false, renamed=true).
-func resolveDestination(src, dst string) (finalDst string, skip, renamed bool) {
-	// 1) dst нет — копируем прямо туда
+func resolveDestination(src, dst string) (finalDst string, skip bool, renamed bool) {
+	// Если нет такого файла — копируем прямо
 	if _, err := os.Stat(dst); os.IsNotExist(err) {
 		return dst, false, false
 	}
-	// 2) dst есть — сравниваем содержимое
+	// Файл есть — сравниваем
 	equal, err := filesAreEqual(src, dst)
 	if err != nil {
-		if useLog {
-			log.Printf("[ERROR] Failed to compare files: %s <-> %s : %v", src, dst, err)
-		}
-		// Обработка ошибки: в этом примере — считаем, что не равны и продолжаем
-		return "", false, false
+		logf(LogErr, "Failed to compare files: %s <-> %s : %v", src, dst, err)
+		// в случае ошибки будем считать, что файл не совпадает
+		return dst, false, false
 	}
-
 	if equal {
-		return dst, true, false // файлы идентичны, можно пропустить
+		return dst, true, false // идентичный файл — пропустить
 	}
 
-	// 3) dst есть и отличается — ищем уникальное имя
+	// файл есть, но отличается — ищем новое имя
 	dir := filepath.Dir(dst)
 	base := filepath.Base(dst)
 	ext := filepath.Ext(base)
@@ -98,38 +97,30 @@ func resolveDestination(src, dst string) (finalDst string, skip, renamed bool) {
 	}
 }
 
-// copyFile копирует содержимое src в dst, создавая директории при необходимости.
+// copyFile копирует содержимое src в dst, создавая все необходимые директории.
 func copyFile(src, dst string) error {
-	if useLog {
-		log.Printf("Opening source: %s", src)
-	}
+	// Открываем исходный файл
 	in, err := os.Open(src)
 	if err != nil {
-		return fmt.Errorf("failed to open source file: %w", err)
+		return fmt.Errorf("failed to open source file %q: %w", src, err)
 	}
 	defer in.Close()
 
-	if useLog {
-		log.Printf("Creating directory: %s", filepath.Dir(dst))
-	}
+	// Создаём папку для dst
 	if err := os.MkdirAll(filepath.Dir(dst), os.ModePerm); err != nil {
-		return fmt.Errorf("failed to create dir: %w", err)
+		return fmt.Errorf("failed to create directory %q: %w", filepath.Dir(dst), err)
 	}
 
-	if useLog {
-		log.Printf("Creating destination file: %s", dst)
-	}
+	// Создаём файл назначения
 	out, err := os.Create(dst)
 	if err != nil {
-		return fmt.Errorf("failed to create dst file: %w", err)
+		return fmt.Errorf("failed to create destination file %q: %w", dst, err)
 	}
 	defer out.Close()
 
-	if useLog {
-		log.Printf("Copying data...")
-	}
+	// Копируем данные
 	if _, err := io.Copy(out, in); err != nil {
-		return fmt.Errorf("copy failed: %w", err)
+		return fmt.Errorf("failed copy from %q to %q: %w", src, dst, err)
 	}
 	return nil
 }

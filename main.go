@@ -1,10 +1,8 @@
-// main.go — запуск, аргументы, логика обхода и прогресса
 package main
 
 import (
 	"bufio"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,18 +12,21 @@ import (
 )
 
 var (
+	// расширения, которые считаем видео
 	videoExtensions = map[string]bool{
 		".mp4": true, ".avi": true, ".mov": true,
 		".mkv": true, ".mts": true, ".3gp": true,
 	}
-	bar               *progressbar.ProgressBar
+	// прогрессбар
+	bar *progressbar.ProgressBar
+	// флаги из CLI
 	useLog, moveFiles bool
-	skipList          []string
-	renamedList       []string
+	// списки для итогового отчёта
+	skipList    []string
+	renamedList []string
 )
 
 func main() {
-
 	var src, dst string
 	var positionalArgs []string
 
@@ -42,12 +43,10 @@ func main() {
 
 	if len(positionalArgs) < 2 {
 		fmt.Println("Usage: f2d3 <sourceDir> <targetDir> [--log] [--move]")
-
 		fmt.Printf("Received %d argument(s):\n", len(os.Args)-1)
 		for i, arg := range os.Args[1:] {
 			fmt.Printf("%d: %s\n", i, arg)
 		}
-
 		os.Exit(1)
 	}
 
@@ -62,7 +61,8 @@ func main() {
 
 	total, err := countFiles(src)
 	if err != nil {
-		log.Fatalf("Failed to count files: %v", err)
+		logf(LogErr, "Failed to count files: %v", err)
+		os.Exit(1)
 	}
 
 	bar = progressbar.NewOptions(total,
@@ -82,30 +82,23 @@ func main() {
 		return processFile(path, dst)
 	})
 	if err != nil {
-		log.Fatalf("Error walking directory: %v", err)
+		logf(LogErr, "Error walking directory: %v", err)
+		os.Exit(1)
 	}
 
-	// Вывод пропущенных идентичных файлов
+	// Итоговый отчёт
 	if len(skipList) > 0 {
-		fmt.Println()
-		fmt.Println("Skipped identical files:")
+		fmt.Println("\nSkipped identical files:")
 		for _, p := range skipList {
 			fmt.Println("  ", p)
-			if useLog {
-				log.Printf("[INFO] Skipped identical: %s", p)
-			}
+			logf(LogInfo, "Skipped identical: %s", p)
 		}
 	}
-
-	// Вывод переименованных файлов
 	if len(renamedList) > 0 {
-		fmt.Println()
-		fmt.Println("Renamed files:")
+		fmt.Println("\nRenamed files:")
 		for _, m := range renamedList {
 			fmt.Println("  ", m)
-			if useLog {
-				log.Printf("[INFO] Renamed: %s", m)
-			}
+			logf(LogInfo, "Renamed: %s", m)
 		}
 	}
 
@@ -120,11 +113,13 @@ func checkTargetDirectory(targetDir string) {
 	if err != nil {
 		if os.IsNotExist(err) {
 			if err := os.MkdirAll(targetDir, os.ModePerm); err != nil {
-				log.Fatalf("Failed to create target directory: %v", err)
+				logf(LogErr, "Failed to create target directory: %v", err)
+				os.Exit(1)
 			}
 			return
 		}
-		log.Fatalf("Failed to read target directory: %v", err)
+		logf(LogErr, "Failed to read target directory: %v", err)
+		os.Exit(1)
 	}
 	if len(entries) > 0 {
 		fmt.Print("Target directory is not empty. Continue? (y/N): ")
@@ -137,7 +132,7 @@ func checkTargetDirectory(targetDir string) {
 	}
 }
 
-// countFiles проходит по всему tree и возвращает количество файлов (не директорий).
+// countFiles проходит по всему дереву и возвращает количество файлов (не директорий).
 func countFiles(root string) (int, error) {
 	count := 0
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -152,16 +147,14 @@ func countFiles(root string) (int, error) {
 	return count, err
 }
 
-// processFile обрабатывает один файл: вычисляет дату, категорию, определяет, копировать/переименовывать/пропускать.
+// processFile обрабатывает один файл: вычисляет дату, категорию и решает, копировать или перемещать.
 func processFile(path, targetBase string) error {
 	ext := strings.ToLower(filepath.Ext(path))
 	isVideo := videoExtensions[ext]
 
 	t, err := getFileDate(path)
-	if err != nil && useLog {
-		log.Printf("[WARN] Failed to get date for %s: %v", path, err)
-	}
 	if err != nil {
+		logf(LogWarning, "Failed to get date for %s: %v", path, err)
 		t = time.Now()
 	}
 
@@ -180,49 +173,31 @@ func processFile(path, targetBase string) error {
 	finalDst, skip, renamed := resolveDestination(path, destPath)
 
 	if skip {
-		fmt.Println("[INFO] Skipped identical:", path)
 		skipList = append(skipList, path)
-		if useLog {
-			log.Printf("[INFO] Skipped identical: %s", path)
-		}
+		logf(LogInfo, "Skipped identical: %s", path)
 		bar.Add(1)
 		return nil
 	}
 
 	if renamed {
 		msg := fmt.Sprintf("%s -> %s", path, finalDst)
-		fmt.Println("[INFO] Renamed:", msg)
 		renamedList = append(renamedList, msg)
-		if useLog {
-			log.Printf("[INFO] Renamed: %s", msg)
-		}
+		logf(LogInfo, "Renamed: %s", msg)
 	}
 
-	if useLog {
-		log.Printf("Copying: %s -> %s", path, finalDst)
-	}
+	logf(LogInfo, "Copying: %s -> %s", path, finalDst)
 	if err := copyFile(path, finalDst); err != nil {
-		if useLog {
-			log.Printf("[ERROR] Copy failed: %s -> %s : %v", path, finalDst, err)
-		}
+		logf(LogErr, "Copy failed: %s -> %s : %v", path, finalDst, err)
 		return err
 	}
-	if useLog {
-		log.Printf("Copied: %s", finalDst)
-	}
+	logf(LogInfo, "Copied: %s", finalDst)
 
 	if moveFiles {
-
 		if err := os.Remove(path); err != nil {
-			if useLog {
-				log.Printf("[ERROR] Failed to remove original file: %s : %v", path, err)
-			}
+			logf(LogErr, "Failed to remove original file: %s : %v", path, err)
 			return err
 		}
-		if useLog {
-			log.Printf("Removed: %s", path)
-		}
-
+		logf(LogInfo, "Removed: %s", path)
 	}
 
 	bar.Add(1)
