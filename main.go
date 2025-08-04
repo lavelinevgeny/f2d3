@@ -30,6 +30,7 @@ func main() {
 	var src, dst string
 	var positionalArgs []string
 
+	// разбор флагов
 	for _, arg := range os.Args[1:] {
 		switch arg {
 		case "--log":
@@ -53,12 +54,18 @@ func main() {
 	src = positionalArgs[0]
 	dst = positionalArgs[1]
 
+	// инициализация логирования
 	if useLog {
 		initLog(src, dst)
 	}
 
-	checkTargetDirectory(dst)
+	// проверка и подготовка целевой директории
+	if err := checkTargetDirectory(dst); err != nil {
+		logf(LogErr, "Cannot prepare target directory: %v", err)
+		os.Exit(1)
+	}
 
+	// подсчет файлов
 	total, err := countFiles(src)
 	if err != nil {
 		logf(LogErr, "Failed to count files: %v", err)
@@ -72,6 +79,7 @@ func main() {
 		progressbar.OptionSetPredictTime(true),
 	)
 
+	// обход дерева
 	err = filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -86,7 +94,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Итоговый отчёт
+	// вывод результатов
 	if len(skipList) > 0 {
 		fmt.Println("\nSkipped identical files:")
 		for _, p := range skipList {
@@ -107,29 +115,27 @@ func main() {
 	}
 }
 
-// checkTargetDirectory проверяет, существует ли целевой каталог, и если он не пуст, запрашивает подтверждение.
-func checkTargetDirectory(targetDir string) {
+// checkTargetDirectory проверяет и создаёт целевую директорию, возвращая ошибку вместо выхода
+func checkTargetDirectory(targetDir string) error {
 	entries, err := os.ReadDir(targetDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			if err := os.MkdirAll(targetDir, os.ModePerm); err != nil {
-				logf(LogErr, "Failed to create target directory: %v", err)
-				os.Exit(1)
+			if mkErr := os.MkdirAll(targetDir, os.ModePerm); mkErr != nil {
+				return fmt.Errorf("failed to create target directory %q: %w", targetDir, mkErr)
 			}
-			return
+			return nil
 		}
-		logf(LogErr, "Failed to read target directory: %v", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to read target directory %q: %w", targetDir, err)
 	}
 	if len(entries) > 0 {
 		fmt.Print("Target directory is not empty. Continue? (y/N): ")
-		scanner := bufio.NewScanner(os.Stdin)
-		scanner.Scan()
-		if strings.TrimSpace(strings.ToLower(scanner.Text())) != "y" {
-			fmt.Println("Operation cancelled.")
-			os.Exit(0)
+		s := bufio.NewScanner(os.Stdin)
+		s.Scan()
+		if strings.ToLower(strings.TrimSpace(s.Text())) != "y" {
+			return fmt.Errorf("operation cancelled by user")
 		}
 	}
+	return nil
 }
 
 // countFiles проходит по всему дереву и возвращает количество файлов (не директорий).
