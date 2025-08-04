@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -32,38 +33,38 @@ type AppConfig struct {
 	RenamedList []string
 }
 
+var (
+	logFlag  = flag.Bool("log", false, "Enable logging to file")
+	moveFlag = flag.Bool("move", false, "Move files instead of copying")
+	helpFlag = flag.Bool("help", false, "Show usage")
+)
 var cfg *AppConfig
 
 func main() {
-	var useLog, moveFiles bool
-	var positionalArgs []string
 
-	// разбор флагов
-	for _, arg := range os.Args[1:] {
-		switch arg {
-		case "--log":
-			useLog = true
-		case "--move":
-			moveFiles = true
-		default:
-			positionalArgs = append(positionalArgs, arg)
-		}
+	flag.Usage = func() {
+		fmt.Fprintf(flag.CommandLine.Output(),
+			"Usage: %s [options] <sourceDir> <targetDir>\n", os.Args[0])
+		flag.PrintDefaults()
 	}
 
-	if len(positionalArgs) < 2 {
-		fmt.Println("Usage: f2d3 <sourceDir> <targetDir> [--log] [--move]")
-		fmt.Printf("Received %d argument(s):\n", len(os.Args)-1)
-		for i, arg := range os.Args[1:] {
-			fmt.Printf("%d: %s\n", i, arg)
-		}
+	flag.Parse()
+	if *helpFlag {
+		flag.Usage()
+		os.Exit(0)
+	}
+
+	args := flag.Args()
+	if len(args) < 2 {
+		flag.Usage()
 		os.Exit(1)
 	}
 
 	cfg = &AppConfig{
-		SrcDir:    positionalArgs[0],
-		DstDir:    positionalArgs[1],
-		UseLog:    useLog,
-		MoveFiles: moveFiles,
+		SrcDir:    args[0],
+		DstDir:    args[1],
+		UseLog:    *logFlag,
+		MoveFiles: *moveFlag,
 	}
 
 	// инициализация логирования
