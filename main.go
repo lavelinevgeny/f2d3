@@ -67,9 +67,7 @@ func main() {
 	}
 
 	// инициализация логирования
-	if cfg.UseLog {
-		initLog(cfg.SrcDir, cfg.DstDir)
-	}
+	initLog(cfg.SrcDir, cfg.DstDir)
 
 	// проверка и подготовка целевой директории
 	if err := checkTargetDirectory(cfg.DstDir); err != nil {
@@ -122,9 +120,7 @@ func main() {
 		}
 	}
 
-	if useLog {
-		logDone()
-	}
+	logf(LogInfo, "Done. Finished at %s", time.Now().Format(time.RFC3339))
 }
 
 // checkTargetDirectory проверяет и создаёт целевую директорию, возвращая ошибку вместо выхода

@@ -71,6 +71,11 @@ func logf(level LogLevel, format string, args ...interface{}) {
 
 // initLog настраивает вывод пакета log в файл f2d3.log
 func initLog(sourceDir, targetDir string) {
+
+	if !cfg.UseLog {
+		return
+	}
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		log.Fatalf("Failed to get current working directory: %v", err)
@@ -91,9 +96,4 @@ func initLog(sourceDir, targetDir string) {
 	logf(LogInfo, "Command: %s", strings.Join(os.Args, " "))
 	logf(LogInfo, "Source: %s", sourceDir)
 	logf(LogInfo, "Target: %s", targetDir)
-}
-
-// logDone пишет время завершения работы
-func logDone() {
-	logf(LogInfo, "Done. Finished at %s", time.Now().Format(time.RFC3339))
 }
