@@ -33,7 +33,7 @@ func filesAreEqual(path1, path2 string) (bool, error) {
 	}
 	defer func() {
 		if cerr := f1.Close(); cerr != nil {
-			logf(LogWarning, "Failed to close file %s: %v", path1, cerr)
+			logf(LogWarning, "failed to close file %s: %v", path1, cerr)
 		}
 	}()
 
@@ -43,7 +43,7 @@ func filesAreEqual(path1, path2 string) (bool, error) {
 	}
 	defer func() {
 		if cerr := f2.Close(); cerr != nil {
-			logf(LogWarning, "Failed to close file %s: %v", path2, cerr)
+			logf(LogWarning, "failed to close file %s: %v", path2, cerr)
 		}
 	}()
 
@@ -62,11 +62,12 @@ func filesAreEqual(path1, path2 string) (bool, error) {
 	return bytes.Equal(h1.Sum(nil), h2.Sum(nil)), nil
 }
 
+// resolveDestination решает, куда копировать src → dst
 // resolveDestination решает, куда копировать src -> dst:
 // 1) если dst не существует — вернёт (dst, skip=false, renamed=false).
 // 2) если dst существует и идентичен src — вернёт (dst, skip=true, renamed=false).
 // 3) если dst существует, но отличается — найдёт dst_1, dst_2… и вернёт (uniqueDst, skip=false, renamed=true).
-func resolveDestination(src, dst string) (finalDst string, skip bool, renamed bool) {
+func resolveDestination(src, dst string) (finalDst string, skip, renamed bool) {
 	// Если нет такого файла — копируем прямо
 	if _, err := os.Stat(dst); os.IsNotExist(err) {
 		return dst, false, false
@@ -74,7 +75,7 @@ func resolveDestination(src, dst string) (finalDst string, skip bool, renamed bo
 	// Файл есть — сравниваем
 	equal, err := filesAreEqual(src, dst)
 	if err != nil {
-		logf(LogErr, "Failed to compare files: %s <-> %s : %v", src, dst, err)
+		logf(LogErr, "failed to compare %s and %s: %v", src, dst, err)
 		// в случае ошибки будем считать, что файл не совпадает
 		return dst, false, false
 	}
@@ -120,7 +121,7 @@ func copyFile(src, dst string) error {
 
 	// Копируем данные
 	if _, err := io.Copy(out, in); err != nil {
-		return fmt.Errorf("failed copy from %q to %q: %w", src, dst, err)
+		return fmt.Errorf("failed to copy data from %q to %q: %w", src, dst, err)
 	}
 	return nil
 }
