@@ -1,4 +1,3 @@
-// main.go — параллельная обработка файлов с пулом горутин и вспомогательными функциями
 package main
 
 import (
@@ -20,14 +19,21 @@ var (
 	bar *progressbar.ProgressBar
 )
 
-func main() {
+// JobResult содержит результат обработки одного файла.
+type JobResult struct {
+	Path       string // исходный путь файла
+	Err        error  // ошибка при обработке, или nil при успехе
+	Skipped    bool   // true, если файл был пропущен (уже существует идентичный)
+	RenamedMsg string // сообщение о переименовании, пусто если не применимо
+}
 
+func main() {
 	start := time.Now()
 
 	logFlag := flag.Bool("log", false, "Enable logging to file")
 	moveFlag := flag.Bool("move", false, "Move files instead of copying")
 	helpFlag := flag.Bool("help", false, "Show usage")
-	workersFlag := flag.Int("workers", runtime.NumCPU(), "maximum number of parallel workers")
+	workersFlag := flag.Int("workers", runtime.NumCPU(), "Maximum number of parallel workers")
 
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(),
@@ -62,26 +68,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	paths := make([]string, 0, 1000)
-	filepath.WalkDir(cfg.SrcDir, func(path string, d os.DirEntry, err error) error {
-
-		if err != nil {
+	var paths []string
+	err := filepath.WalkDir(cfg.SrcDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
 			return err
 		}
-
-		if d.IsDir() {
+		if media := lookupExtType(path); media == MediaUnknown {
 			return nil
 		}
-
-		media := lookupExtType(path)
-		if media == MediaUnknown {
-			return nil
-		}
-
 		paths = append(paths, path)
-
 		return nil
 	})
+	if err != nil {
+		logf(LogErr, "walk error: %v", err)
+		os.Exit(1)
+	}
 
 	total := len(paths)
 
@@ -113,7 +114,7 @@ func main() {
 	}
 
 	jobs := make(chan string)
-	results := make(chan error)
+	results := make(chan JobResult)
 	var wg sync.WaitGroup
 
 	for i := 0; i < workers; i++ {
@@ -121,10 +122,13 @@ func main() {
 		go func() {
 			defer wg.Done()
 			for p := range jobs {
-				results <- processFile(cfg, p)
+				res := processFile(cfg, p)
+				res.Path = p
+				results <- res
 			}
 		}()
 	}
+
 	go func() {
 		wg.Wait()
 		close(results)
@@ -137,25 +141,35 @@ func main() {
 		close(jobs)
 	}()
 
-	for err := range results {
+	var skipList, renamedList []string
+	for res := range results {
 		bar.Add(1)
-		if err != nil {
-			logf(LogErr, "%v", err)
+		if res.Err != nil {
+			logf(LogErr, "%v", res.Err)
+		}
+		if res.Skipped {
+			skipList = append(skipList, res.Path)
+			logf(LogNotice, "Skipped identical: %s", res.Path)
+		}
+		if msg := res.RenamedMsg; msg != "" {
+			renamedList = append(renamedList, msg)
+			logf(LogNotice, "Renamed: %s", msg)
 		}
 	}
 
-	if len(cfg.SkipList) > 0 {
+	cfg.SkipList = skipList
+	cfg.RenamedList = renamedList
+
+	if len(skipList) > 0 {
 		fmt.Println("Skipped identical files:")
-		for _, p := range cfg.SkipList {
+		for _, p := range skipList {
 			fmt.Println("  ", p)
-			logf(LogNotice, "Skipped identical: %s", p)
 		}
 	}
-	if len(cfg.RenamedList) > 0 {
+	if len(renamedList) > 0 {
 		fmt.Println("Renamed files:")
-		for _, m := range cfg.RenamedList {
+		for _, m := range renamedList {
 			fmt.Println("  ", m)
-			logf(LogNotice, "Renamed: %s", m)
 		}
 	}
 
@@ -164,7 +178,7 @@ func main() {
 	logf(LogNotice, "Processed %d files in %s", total, elapsed)
 }
 
-// checkTargetDirectory проверяет и создаёт целевой каталог
+// checkTargetDirectory проверяет наличие и создает целевую директорию при необходимости
 func checkTargetDirectory(targetDir string) error {
 	entries, err := os.ReadDir(targetDir)
 	if err != nil {
@@ -187,18 +201,16 @@ func checkTargetDirectory(targetDir string) error {
 	return nil
 }
 
-// processFile обрабатывает один файл: копирует либо перемещает
-func processFile(cfg *AppConfig, path string) error {
-
-	media := lookupExtType(path)
-	isVideo := media == MediaVideo
-
+// processFile выполняет копирование/перемещение одного файла и возвращает JobResult
+func processFile(cfg *AppConfig, path string) JobResult {
 	t, err := getFileDate(path)
 	if err != nil {
 		logf(LogWarning, "failed to get date for %s: %v", path, err)
 		t = time.Now()
 	}
 
+	media := lookupExtType(path)
+	isVideo := media == MediaVideo
 	year := t.Format("2006")
 	date := t.Format("20060102")
 	category := ""
@@ -212,28 +224,24 @@ func processFile(cfg *AppConfig, path string) error {
 	destPath := filepath.Join(destDir, filename)
 
 	finalDst, skip, renamed := resolveDestination(path, destPath)
-
 	if skip {
-		cfg.SkipList = append(cfg.SkipList, path)
-		logf(LogNotice, "Skipped identical: %s", path)
-		return nil
+		return JobResult{Skipped: true}
 	}
 
-	if renamed {
-		msg := fmt.Sprintf("%s -> %s", path, finalDst)
-		cfg.RenamedList = append(cfg.RenamedList, msg)
-		logf(LogNotice, "Renamed: %s", msg)
-	}
-
-	logf(LogInfo, "Copying: %s -> %s", path, finalDst)
 	if err := copyFile(path, finalDst); err != nil {
-		return fmt.Errorf("processing %s failed: %w", path, err)
+		return JobResult{Err: fmt.Errorf("processing %s failed: %w", path, err)}
 	}
+
 	if cfg.MoveFiles {
 		if err := os.Remove(path); err != nil {
-			return fmt.Errorf("failed to remove original %s: %w", path, err)
+			return JobResult{Err: fmt.Errorf("failed to remove original %s: %w", path, err)}
 		}
 	}
 
-	return nil
+	msg := ""
+	if renamed {
+		msg = fmt.Sprintf("%s -> %s", path, finalDst)
+	}
+
+	return JobResult{RenamedMsg: msg}
 }
